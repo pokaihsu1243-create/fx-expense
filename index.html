@@ -268,7 +268,7 @@ async function lookup(items, category) {
         if (p.amount !== '') row.twd = mulRound(p.amount, buy);
       } else {
         const first = Object.keys(tbl).sort()[0];
-        row.remark = '查無匯率' + (first && p.date < first ? '（匯率資料最早到 ' + first + '）' : '');
+        row.remark = '查無匯率' + (first && p.date < first ? '（網頁版只保留最近 ' + (meta.keepMonths || 3) + ' 個月匯率，最早到 ' + first + '；更早的請用本機版查）' : '');
         missing++;
       }
     }
@@ -294,7 +294,7 @@ async function init() {
     meta = await getJson('data/meta.json');
     currencies = [TWD_OPT].concat(meta.currencies.filter(c => c.code !== 'TWD'));
     $('#cat').innerHTML = Object.entries(meta.categories).map(([k, v]) => '<option value="' + k + '">' + esc(v) + '</option>').join('');
-    $('#dataInfo').textContent = '匯率資料更新時間：' + meta.updatedAt + (meta.mode === 'local' ? '（本機即時查詢）' : '（每天下午約 5 點自動更新）');
+    $('#dataInfo').textContent = '匯率資料更新時間：' + meta.updatedAt + (meta.mode === 'local' ? '（本機即時查詢）' : '（每天下午約 5 點自動更新，保留最近 ' + (meta.keepMonths || 3) + ' 個月）');
   } catch (e) {
     $('#msg').textContent = '讀不到匯率資料：' + e.message + '（請確認網路後重新整理）';
     currencies = [TWD_OPT, { code: 'USD', label: '美元USD' }];

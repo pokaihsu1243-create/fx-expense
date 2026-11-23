@@ -1,6 +1,8 @@
 {
- "updatedAt": "2026-11-23 15:23",
+ "updatedAt": "2026-11-23 15:43",
  "mode": "static",
+ "keepMonths": 3,
+ "keepFrom": "2026-08-08",
  "categories": {
   "LastBusinessDayRate": "營業日最後一次匯率(約16:00)",
   "FinalBusinessHourRate": "營業時間最後一次匯率(約15:30)",
