@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>出差報支匯率查詢</title>
+<style>
+  :root { --ink:#1f2933; --sub:#5f6b7a; --line:#d9dee5; --bg:#f4f6f8; --card:#fff; --accent:#7a2e8e; --warn:#b45309; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 "Microsoft JhengHei","PingFang TC",sans-serif; }
+  main { max-width:1000px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--sub); margin:0 0 18px; font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; }
+  select, input[type=date], input[type=text], input[type=number] { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; color:inherit; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:6px 8px; text-align:left; vertical-align:middle; }
+  th { font-size:13px; color:var(--sub); font-weight:600; white-space:nowrap; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  #inTable td { border-bottom:1px solid var(--line); }
+  #inTable input[type=text] { width:100%; }
+  #inTable .a { width:110px; text-align:right; }
+  #inTable .g { width:110px; }
+  .btn { font:inherit; padding:7px 16px; border-radius:6px; border:1px solid var(--line); background:#fff; cursor:pointer; color:inherit; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.pri { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+  .btn.x { padding:2px 9px; color:var(--sub); }
+  #inTable td.mv { white-space:nowrap; padding-right:2px; }
+  #inTable .h { cursor:grab; color:var(--sub); padding:2px 6px; font-size:16px; user-select:none; }
+  #inTable .mvb { padding:1px 6px; font-size:12px; color:var(--sub); }
+  #inTable tr.dragging { opacity:.4; }
+  #inTable tr.flash td { background:#f3e8f7; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
+  .fill { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:14px; color:var(--sub); }
+  .fill input[type=number] { width:64px; }
+  #msg { margin-top:10px; color:var(--bad); min-height:1.4em; }
+  .scroll { overflow-x:auto; }
+  #result { display:none; }
+
+  /* 報支表（仿會計格式） */
+  #sheet { background:#fff; padding:14px 16px; color:#000; }
+  #sheet .top { display:flex; flex-wrap:wrap; gap:16px; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+  #sheet .title { font-size:17px; font-weight:700; border:none; padding:2px 0; width:100%; min-width:260px; color:#000; background:transparent; }
+  #sheet .rule { font-size:12.5px; color:#333; margin-top:4px; line-height:1.5; }
+  #sheet table { width:auto; }
+  #sheet .rt td, #sheet .rt th, #sheet .dt td, #sheet .dt th { border:1px solid #888; padding:4px 8px; font-size:13.5px; color:#000; }
+  #sheet .rt th { background:#f0f0f0; }
+  #sheet .rt .red { color:#c00000; font-weight:700; }
+  #sheet .dt { width:100%; }
+  #sheet .dt th { background:#f0f0f0; }
+  #sheet .dt tr.grp td { font-weight:700; background:#fafafa; }
+  #sheet .dt tr.sub td { font-weight:700; }
+  #sheet .dt tr.tot td { font-weight:700; font-size:15px; border-top:2px solid #000; }
+  #sheet .remark { font-size:12px; color:var(--warn); }
+  #sheet .bad { color:var(--bad); }
+  #sheet .foot { font-size:12px; color:#333; margin-top:8px; line-height:1.5; word-break:break-all; }
+  @media print {
+    body { background:#fff; }
+    main { max-width:none; padding:0; }
+    .no-print { display:none !important; }
+    .card { border:none; padding:0; margin:0; }
+    #sheet { padding:0; }
+    #sheet .remark { color:#000; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="no-print">
+    <h1>出差報支匯率查詢</h1>
+    <p class="sub">照會計的算法：兆豐銀行・即期・銀行買入匯率，用消費當天的；假日沒有牌告就往前取最近一個營業日。</p>
+
+    <div class="card">
+      <h2>支出明細</h2>
+      <div class="fill">
+        快速產生連續日期：起日 <input type="date" id="fStart">
+        天數 <input type="number" id="fDays" min="1" max="60" value="1">
+        <button class="btn" id="fGo" type="button">產生</button>
+      </div>
+      <div class="scroll">
+      <table id="inTable" style="margin-top:10px">
+        <thead><tr><th title="拖曳 ⠿ 或按 ↑↓ 調整順序">順序</th><th>消費日期</th><th>類別</th><th>說明（選填）</th><th>幣別</th><th class="num">外幣金額</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <datalist id="groups"><option value="餐費"><option value="計程車"><option value="交際費"><option value="住宿"><option value="交通"><option value="雜費"></datalist>
+      <div class="bar">
+        <button class="btn" id="add" type="button">＋ 加一列</button>
+        <button class="btn" id="clear" type="button">清空</button>
+        <span style="flex:1"></span>
+        <label class="sub" style="margin:0">取當天哪一筆 <select id="cat"></select></label>
+        <button class="btn pri" id="go" type="button">算台幣</button>
+      </div>
+      <div id="msg"></div>
+    </div>
+  </div>
+
+  <div class="card" id="result">
+    <div id="sheet">
+      <div class="top">
+        <div style="flex:1;min-width:260px">
+          <input class="title" id="title" type="text">
+          <div class="rule" id="rule"></div>
+        </div>
+        <table class="rt">
+          <thead><tr><th>兆豐即期匯率</th><th class="red">買入</th><th>更新日期</th><th>用於消費日</th></tr></thead>
+          <tbody id="rtBody"></tbody>
+        </table>
+      </div>
+      <table class="dt">
+        <thead><tr><th>消費日期</th><th>類別</th><th>說明</th><th>幣別</th><th class="num">外幣金額</th><th class="num">匯率</th><th class="num">台幣</th></tr></thead>
+        <tbody id="dtBody"></tbody>
+      </table>
+      <div class="foot" id="foot"></div>
+    </div>
+    <div class="bar no-print">
+      <button class="btn pri" id="png" type="button">存成圖片（佐證）</button>
+      <button class="btn" id="print" type="button">列印／存 PDF</button>
+      <button class="btn" id="copy" type="button">複製表格（貼到 Excel）</button>
+      <a class="btn" id="src" target="_blank" rel="noopener" style="text-decoration:none">開兆豐官網核對</a>
+      <span id="copied" class="sub" style="margin:0"></span>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const tbody = $('#inTable tbody');
+let currencies = [];
+let last = null;
+const KEY = 'fx-expense-rows-v2';  // 不要改這個名字，改了舊紀錄會讀不到
+const TWD_OPT = { code: 'TWD', label: '新台幣（不換算）' };
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function curOptions(sel) {
+  return currencies.map(c => '<option value="' + c.code + '"' + (c.code === sel ? ' selected' : '') + '>' + esc(c.code) + '</option>').join('');
+}
+function todayStr() { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+
+function addRow(r, before) {
+  r = r || {};
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td class="mv"><span class="h" draggable="true" title="按住拖曳移動">⠿</span>' +
+    '<button class="btn mvb up" type="button" title="上移">↑</button>' +
+    '<button class="btn mvb dn" type="button" title="下移">↓</button>' +
+    '<button class="btn mvb ins" type="button" title="在這列下方插入一列">＋</button></td>' +
+    '<td><input type="date" class="d" max="' + todayStr() + '" value="' + esc(r.date || '') + '"></td>' +
+    '<td><input type="text" class="g" list="groups" value="' + esc(r.group || '餐費') + '"></td>' +
+    '<td><input type="text" class="n" value="' + esc(r.note || '') + '"></td>' +
+    '<td><select class="c">' + curOptions(r.currency || 'USD') + '</select></td>' +
+    '<td class="num"><input type="text" inputmode="decimal" class="a" value="' + esc(r.amount || '') + '"></td>' +
+    '<td><button class="btn x" type="button" title="刪除這列">×</button></td>';
+  tr.querySelector('.x').onclick = () => { tr.remove(); if (!tbody.children.length) addRow(); save(); };
+  tr.querySelector('.up').onclick = () => { if (tr.previousElementSibling) { tbody.insertBefore(tr, tr.previousElementSibling); moved(tr); } };
+  tr.querySelector('.dn').onclick = () => { if (tr.nextElementSibling) { tbody.insertBefore(tr.nextElementSibling, tr); moved(tr); } };
+  tr.querySelector('.ins').onclick = () => {
+    const cur = readRow(tr);
+    const nr = addRow({ date: cur.date, group: cur.group, currency: cur.currency }, tr.nextElementSibling);
+    moved(nr); nr.querySelector('.n').focus();
+  };
+  const h = tr.querySelector('.h');
+  h.addEventListener('dragstart', e => { dragRow = tr; tr.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', ''); e.dataTransfer.setDragImage(tr, 10, 10); } catch (_) {} });
+  h.addEventListener('dragend', () => { tr.classList.remove('dragging'); dragRow = null; save(); });
+  if (before) tbody.insertBefore(tr, before); else tbody.appendChild(tr);
+  return tr;
+}
+// 列的順序調整（拖曳 ⠿ 或 ↑↓）；順序會一起存起來，算台幣時類別也照第一次出現的順序排
+let dragRow = null;
+tbody.addEventListener('dragover', e => {
+  if (!dragRow) return;
+  e.preventDefault();
+  const over = e.target.closest('tr');
+  if (!over || over === dragRow || over.parentNode !== tbody) return;
+  const r = over.getBoundingClientRect();
+  tbody.insertBefore(dragRow, e.clientY < r.top + r.height / 2 ? over : over.nextElementSibling);
+});
+tbody.addEventListener('drop', e => { if (dragRow) e.preventDefault(); });
+function moved(tr) { save(); tr.classList.add('flash'); setTimeout(() => tr.classList.remove('flash'), 400); }
+function readRow(tr) {
+  return { date: tr.querySelector('.d').value, group: tr.querySelector('.g').value.trim(),
+    note: tr.querySelector('.n').value.trim(), currency: tr.querySelector('.c').value,
+    amount: tr.querySelector('.a').value.trim() };
+}
+function readRows() { return [...tbody.children].map(readRow); }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(readRows())); } catch (e) {} }
+function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+
+async function init() {
+  try {
+    const res = await fetch('/api/currencies');
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || '讀取失敗');
+    currencies = [TWD_OPT].concat(j.currencies.filter(c => c.code !== 'TWD'));
+    $('#cat').innerHTML = Object.entries(j.categories).map(([k, v]) => '<option value="' + k + '">' + esc(v) + '</option>').join('');
+  } catch (e) {
+    $('#msg').textContent = '無法連到兆豐官網：' + e.message + '（請確認網路後重新整理）';
+    currencies = [TWD_OPT, { code: 'USD', label: '美元USD' }];
+  }
+  const saved = load().filter(r => r.date || r.amount);
+  if (saved.length) saved.forEach(r => addRow(r)); else addRow();
+}
+
+$('#add').onclick = () => {
+  const rows = readRows(); const prev = rows[rows.length - 1] || {};
+  addRow({ date: prev.date, group: prev.group, currency: prev.currency });
+};
+$('#clear').onclick = () => { tbody.innerHTML = ''; addRow(); save(); $('#result').style.display = 'none'; };
+tbody.addEventListener('change', save);
+
+$('#fGo').onclick = () => {
+  const s = $('#fStart').value, n = parseInt($('#fDays').value, 10) || 0;
+  if (!s || n < 1) { $('#msg').textContent = '請先選起日並填天數'; return; }
+  $('#msg').textContent = '';
+  const rows = readRows().filter(r => r.date || r.amount);
+  tbody.innerHTML = '';
+  rows.forEach(r => addRow(r));
+  const [y, m, d] = s.split('-').map(Number);
+  for (let i = 0; i < Math.min(n, 60); i++) {
+    const dt = new Date(Date.UTC(y, m - 1, d + i));
+    addRow({ date: dt.toISOString().slice(0, 10) });
+  }
+  save();
+};
+
+function fmt(n) { return n == null ? '' : Number(n).toLocaleString('en-US'); }
+function fmtAmt(s) { if (s === '' || s == null) return ''; const p = String(s).split('.'); p[0] = Number(p[0]).toLocaleString('en-US'); return p.join('.'); }
+function dot(d) { return d ? d.replace(/-/g, '.') : ''; }
+function slash(d) { return d ? d.replace(/-/g, '/') : ''; }
+function md(d) { return d ? Number(d.slice(5, 7)) + '/' + Number(d.slice(8, 10)) : ''; }
+
+$('#go').onclick = async () => {
+  const items = readRows().filter(r => r.date);
+  if (!items.length) { $('#msg').textContent = '請至少填一列消費日期'; return; }
+  save();
+  $('#msg').textContent = '';
+  const btn = $('#go'); btn.disabled = true; btn.textContent = '查詢中…';
+  try {
+    const res = await fetch('/api/rates', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, category: $('#cat').value })
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || '查詢失敗');
+    render(j);
+  } catch (e) {
+    $('#msg').textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '算台幣';
+  }
+};
+
+function render(j) {
+  last = j;
+  $('#title').value = j.dateFrom.replace(/-/g, '') + '~' + j.dateTo.slice(5).replace('-', '') + ' 出差行程費用明細';
+  $('#rule').textContent = '匯率：兆豐銀行 即期 銀行買入，' + j.categoryLabel + '；採消費當日匯率，假日採前一營業日。';
+  $('#rtBody').innerHTML = j.rateTable.map(r =>
+    '<tr><td>' + esc(r.currency) + '</td><td class="num">' + esc(r.rate) + '</td><td>' + esc(slash(r.rateDate)) + '</td><td>' +
+    esc(r.forDates.map(md).join('、')) + '</td></tr>').join('');
+  let h = '';
+  j.groups.forEach(g => {
+    h += '<tr class="grp"><td colspan="7">' + esc(g.name) + '</td></tr>';
+    g.rows.forEach(r => {
+      h += '<tr><td>' + esc(dot(r.date)) + '</td><td>' + esc(g.name) + '</td><td>' + esc(r.note) +
+        (r.remark ? (r.note ? '<br>' : '') + '<span class="remark">' + esc(r.remark) + '</span>' : '') + '</td><td>' + esc(r.currency) + '</td>' +
+        '<td class="num">' + esc(fmtAmt(r.amount)) + '</td>' +
+        '<td class="num' + (r.rate ? '' : ' bad') + '">' + esc(r.currency === 'TWD' ? '—' : (r.rate ? String(Number(r.rate)) : '查無')) + '</td>' +
+        '<td class="num">' + esc(fmt(r.twd)) + '</td></tr>';
+    });
+    h += '<tr class="sub"><td colspan="5"></td><td class="num">台幣</td><td class="num">' + fmt(g.subtotal) + '</td></tr>';
+  });
+  h += '<tr class="tot"><td colspan="5"></td><td class="num">可報支合計</td><td class="num">NT$ ' + fmt(j.totalTwd) + '</td></tr>';
+  $('#dtBody').innerHTML = h;
+  $('#foot').innerHTML = '每筆台幣＝外幣金額 × 匯率，四捨五入到元；各類別小計＝各筆台幣加總。' +
+    (j.missing ? '<b class="bad">有 ' + j.missing + ' 筆查無匯率，未計入合計。</b>' : '') +
+    '<br>匯率來源：' + esc(j.source) + '（' + esc(j.sourceUrl) + '）　查詢時間：' + esc(j.queriedAt);
+  $('#src').href = j.sourceUrl;
+  $('#copied').textContent = '';
+  $('#result').style.display = 'block';
+  $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('#copy').onclick = async () => {
+  if (!last) return;
+  const TAB = String.fromCharCode(9), NL = String.fromCharCode(10);
+  const lines = [[$('#title').value].join(TAB), ['兆豐即期匯率', '買入', '更新日期'].join(TAB)];
+  last.rateTable.forEach(r => lines.push([r.currency, r.rate, slash(r.rateDate)].join(TAB)));
+  lines.push('');
+  lines.push(['消費日期', '類別', '說明', '幣別', '外幣金額', '匯率', '台幣', '備註'].join(TAB));
+  last.groups.forEach(g => {
+    g.rows.forEach(r => lines.push([dot(r.date), g.name, r.note, r.currency, r.amount, r.currency === 'TWD' ? '' : (r.rate || ''),r.twd == null ? '' : r.twd, r.remark].join(TAB)));
+    lines.push(['', '', '', '', '', '台幣', g.subtotal, ''].join(TAB));
+  });
+  lines.push(['', '', '', '', '', '合計', last.totalTwd, ''].join(TAB));
+  try { await navigator.clipboard.writeText(lines.join(NL)); $('#copied').textContent = '已複製，到 Excel 按 Ctrl+V 貼上'; }
+  catch (e) { $('#copied').textContent = '複製失敗，請直接選取表格複製'; }
+};
+$('#print').onclick = () => window.print();
+$('#png').onclick = async () => {
+  if (!last) return;
+  if (typeof html2canvas !== 'function') { $('#copied').textContent = '存圖元件沒載入（需要網路），請改用「列印／存 PDF」'; return; }
+  try {
+    const canvas = await html2canvas($('#sheet'), { scale: 2, backgroundColor: '#ffffff' });
+    const a = document.createElement('a');
+    a.download = '出差報支匯率佐證_' + last.dateFrom.replace(/-/g, '') + '-' + last.dateTo.replace(/-/g, '') + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+    $('#copied').textContent = '圖片已存到「下載」資料夾';
+  } catch (e) { $('#copied').textContent = '存圖失敗：' + e.message + '，請改用「列印／存 PDF」'; }
+};
+
+init();
+</script>
+</body>
+</html>

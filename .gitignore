@@ -1,0 +1,8 @@
+# 個人報支紀錄與備份不要上傳
+*.json
+*.bak*
+# 打包產物
+build/
+dist/
+*.spec
+__pycache__/
