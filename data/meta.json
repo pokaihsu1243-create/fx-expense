@@ -1,0 +1,81 @@
+{
+ "updatedAt": "2026-11-23 15:20",
+ "mode": "static",
+ "categories": {
+  "LastBusinessDayRate": "營業日最後一次匯率(約16:00)",
+  "FinalBusinessHourRate": "營業時間最後一次匯率(約15:30)",
+  "FirstBusinessDayRate": "營業時間第一次匯率"
+ },
+ "currencies": [
+  {
+   "code": "USD",
+   "label": "美元USD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "HKD",
+   "label": "港幣HKD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "GBP",
+   "label": "英鎊GBP",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "JPY",
+   "label": "日圓JPY",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "AUD",
+   "label": "澳幣AUD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "CAD",
+   "label": "加拿大幣CAD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "SGD",
+   "label": "新加坡幣SGD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "ZAR",
+   "label": "南非幣ZAR",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "SEK",
+   "label": "瑞典幣SEK",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "CHF",
+   "label": "瑞士法郎CHF",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "THB",
+   "label": "泰銖THB",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "NZD",
+   "label": "紐西蘭幣NZD",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "EUR",
+   "label": "歐元EUR",
+   "coveredThrough": "2026-11-22"
+  },
+  {
+   "code": "CNY",
+   "label": "人民幣CNY",
+   "coveredThrough": "2026-11-22"
+  }
+ ]
+}

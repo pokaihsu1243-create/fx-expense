@@ -69,7 +69,7 @@
 <main>
   <div class="no-print">
     <h1>出差報支匯率查詢</h1>
-    <p class="sub">照會計的算法：兆豐銀行・即期・銀行買入匯率，用消費當天的；假日沒有牌告就往前取最近一個營業日。</p>
+    <p class="sub">照會計的算法：兆豐銀行・即期・銀行買入匯率，用消費當天的；假日沒有牌告就往前取最近一個營業日。<br><span id="dataInfo"></span>　填的明細只存在自己的瀏覽器，不會上傳。</p>
 
     <div class="card">
       <h2>支出明細</h2>
@@ -88,6 +88,9 @@
       <div class="bar">
         <button class="btn" id="add" type="button">＋ 加一列</button>
         <button class="btn" id="clear" type="button">清空</button>
+        <button class="btn" id="exportRows" type="button" title="把目前的明細存成檔案，換電腦或換瀏覽器時可匯入">匯出紀錄</button>
+        <button class="btn" id="importRows" type="button" title="讀回之前匯出的明細檔">匯入紀錄</button>
+        <input type="file" id="importFile" accept=".json,application/json" hidden>
         <span style="flex:1"></span>
         <label class="sub" style="margin:0">取當天哪一筆 <select id="cat"></select></label>
         <button class="btn pri" id="go" type="button">算台幣</button>
@@ -188,20 +191,144 @@ function readRows() { return [...tbody.children].map(readRow); }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(readRows())); } catch (e) {} }
 function load() { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
 
+// ---- 匯率資料：網頁版讀 GitHub 每天自動更新的 data/*.json；本機版由 server.py 即時提供同格式 ----
+let meta = null;
+const ratesCache = {};
+const LOOKBACK_DAYS = 15;  // 假日往前找營業日，最多回看幾天
+const SOURCE = '兆豐國際商業銀行官網－匯率查詢－歷史匯率';
+const SOURCE_URL = 'https://www.megabank.com.tw/personal/savings/foreign-service/forex?tab=3';
+
+async function getJson(url) {
+  const res = await fetch(url, { cache: 'no-cache' });
+  let j = null;
+  try { j = await res.json(); } catch (e) {}
+  if (!res.ok || !j) throw new Error((j && j.error) || ('讀取 ' + url + ' 失敗（' + res.status + '）'));
+  return j;
+}
+async function getRates(code) {
+  if (!ratesCache[code]) ratesCache[code] = await getJson('data/rates/' + code + '.json');
+  return ratesCache[code];
+}
+function addDays(d, n) { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); }
+function daysBetween(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
+// 精確的「外幣 × 匯率 → 四捨五入到元」（用整數運算，避免小數誤差；.5 一律進位，與 Python ROUND_HALF_UP 相同）
+function decParse(s) {
+  s = String(s).trim(); const neg = s.startsWith('-'); if (neg || s.startsWith('+')) s = s.slice(1);
+  const [i, f = ''] = s.split('.');
+  return { n: BigInt((i || '0') + f) * (neg ? -1n : 1n), s: f.length };
+}
+function mulRound(a, b) {
+  const x = decParse(a), y = decParse(b);
+  let p = x.n * y.n; const neg = p < 0n; if (neg) p = -p;
+  const base = 10n ** BigInt(x.s + y.s);
+  let q = p / base; if ((p % base) * 2n >= base) q += 1n;
+  return Number(neg ? -q : q);
+}
+
+// 會計算法：兆豐・即期・銀行買入・消費當天；假日往前取最近營業日；每筆四捨五入到元，小計＝各筆加總
+async function lookup(items, category) {
+  const today = todayStr();
+  const curInfo = {}; meta.currencies.forEach(c => { curInfo[c.code] = c; });
+  const parsed = items.map((it, k) => {
+    const i = k + 1, d = String(it.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || isNaN(Date.parse(d))) throw new Error('第 ' + i + ' 列日期格式不對');
+    const code = String(it.currency || '').trim().toUpperCase() || 'USD';
+    if (d > today) throw new Error('第 ' + i + ' 列日期 ' + d + ' 還沒到，查不到匯率');
+    const amt = String(it.amount || '').replace(/,/g, '').trim();
+    if (amt && !/^[+-]?(\d+\.?\d*|\.\d+)$/.test(amt)) throw new Error('第 ' + i + ' 列金額不是數字');
+    if (code !== 'TWD') {
+      const ci = curInfo[code];
+      if (!ci) throw new Error('第 ' + i + ' 列：兆豐沒有 ' + code + ' 的即期匯率，請改用新台幣（TWD）填實際扣款金額');
+      if (d > ci.coveredThrough) throw new Error('第 ' + i + ' 列 ' + d + ' 的 ' + code + ' 匯率還沒更新（目前只到 ' + ci.coveredThrough + '，每天下午約 5 點更新）');
+    }
+    return { date: d, currency: code, amount: amt, group: String(it.group || '').trim() || '其他', note: String(it.note || '').trim() };
+  });
+  const tables = {};
+  for (const code of [...new Set(parsed.map(p => p.currency))].filter(c => c !== 'TWD').sort()) {
+    tables[code] = (await getRates(code))[category] || {};
+  }
+  const groups = {}, order = [], rateTbl = {};
+  let missing = 0;
+  for (const p of parsed) {
+    const row = { date: p.date, currency: p.currency, note: p.note, amount: p.amount, usedDate: null, rate: null, twd: null, remark: '' };
+    if (p.currency === 'TWD') {  // 新台幣消費：不換算，直接四捨五入到元
+      row.usedDate = p.date; row.rate = '1';
+      if (p.amount !== '') row.twd = mulRound(p.amount, '1');
+    } else {
+      const tbl = tables[p.currency];
+      let used = p.date;
+      while (!(used in tbl) && daysBetween(used, p.date) < LOOKBACK_DAYS) used = addDays(used, -1);
+      if (used in tbl && tbl[used]) {
+        const buy = tbl[used];
+        row.usedDate = used; row.rate = buy;
+        const key = p.currency + '|' + used;
+        if (!rateTbl[key]) rateTbl[key] = { currency: p.currency, rateDate: used, rate: buy, forDates: [] };
+        if (!rateTbl[key].forDates.includes(p.date)) rateTbl[key].forDates.push(p.date);
+        if (used !== p.date) row.remark = p.date.slice(5).replace('-', '/') + ' 無牌告，採前一營業日 ' + used.slice(5).replace('-', '/');
+        if (p.amount !== '') row.twd = mulRound(p.amount, buy);
+      } else {
+        const first = Object.keys(tbl).sort()[0];
+        row.remark = '查無匯率' + (first && p.date < first ? '（匯率資料最早到 ' + first + '）' : '');
+        missing++;
+      }
+    }
+    if (!groups[p.group]) { groups[p.group] = { name: p.group, rows: [], subtotal: 0 }; order.push(p.group); }
+    groups[p.group].rows.push(row);
+    if (row.twd != null) groups[p.group].subtotal += row.twd;
+  }
+  const outGroups = order.map(n => groups[n]);
+  const dates = parsed.map(p => p.date).sort();
+  const n = new Date();
+  return {
+    groups: outGroups, totalTwd: outGroups.reduce((s, g) => s + g.subtotal, 0), missing,
+    rateTable: Object.keys(rateTbl).sort().map(k => rateTbl[k]),
+    dateFrom: dates[0], dateTo: dates[dates.length - 1],
+    categoryLabel: meta.categories[category],
+    queriedAt: todayStr() + ' ' + String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0'),
+    dataUpdatedAt: meta.updatedAt, source: SOURCE, sourceUrl: SOURCE_URL,
+  };
+}
+
 async function init() {
   try {
-    const res = await fetch('/api/currencies');
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || '讀取失敗');
-    currencies = [TWD_OPT].concat(j.currencies.filter(c => c.code !== 'TWD'));
-    $('#cat').innerHTML = Object.entries(j.categories).map(([k, v]) => '<option value="' + k + '">' + esc(v) + '</option>').join('');
+    meta = await getJson('data/meta.json');
+    currencies = [TWD_OPT].concat(meta.currencies.filter(c => c.code !== 'TWD'));
+    $('#cat').innerHTML = Object.entries(meta.categories).map(([k, v]) => '<option value="' + k + '">' + esc(v) + '</option>').join('');
+    $('#dataInfo').textContent = '匯率資料更新時間：' + meta.updatedAt + (meta.mode === 'local' ? '（本機即時查詢）' : '（每天下午約 5 點自動更新）');
   } catch (e) {
-    $('#msg').textContent = '無法連到兆豐官網：' + e.message + '（請確認網路後重新整理）';
+    $('#msg').textContent = '讀不到匯率資料：' + e.message + '（請確認網路後重新整理）';
     currencies = [TWD_OPT, { code: 'USD', label: '美元USD' }];
   }
   const saved = load().filter(r => r.date || r.amount);
   if (saved.length) saved.forEach(r => addRow(r)); else addRow();
 }
+
+// ---- 紀錄匯出／匯入（換電腦、換瀏覽器時搬資料用；檔案只存在自己電腦）----
+$('#exportRows').onclick = () => {
+  const rows = readRows().filter(r => r.date || r.amount || r.note);
+  const blob = new Blob([JSON.stringify(rows, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.download = '報支明細紀錄_' + todayStr().replace(/-/g, '') + '.json';
+  a.href = URL.createObjectURL(blob); a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+$('#importRows').onclick = () => $('#importFile').click();
+$('#importFile').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    const arr = JSON.parse(await f.text());
+    if (!Array.isArray(arr)) throw new Error('格式不對');
+    const rows = arr.filter(r => r && typeof r === 'object').map(r => ({
+      date: String(r.date || ''), group: String(r.group || ''), note: String(r.note || ''),
+      currency: String(r.currency || 'USD'), amount: String(r.amount == null ? '' : r.amount) }));
+    if (!rows.length) throw new Error('檔案裡沒有明細');
+    const has = readRows().some(r => r.date || r.amount || r.note);
+    if (has && !confirm('匯入會取代目前畫面上的 ' + readRows().length + ' 列明細，確定嗎？')) return;
+    tbody.innerHTML = ''; rows.forEach(r => addRow(r)); save();
+    $('#msg').textContent = ''; $('#result').style.display = 'none';
+  } catch (err) { $('#msg').textContent = '匯入失敗：' + err.message; }
+};
 
 $('#add').onclick = () => {
   const rows = readRows(); const prev = rows[rows.length - 1] || {};
@@ -238,13 +365,8 @@ $('#go').onclick = async () => {
   $('#msg').textContent = '';
   const btn = $('#go'); btn.disabled = true; btn.textContent = '查詢中…';
   try {
-    const res = await fetch('/api/rates', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, category: $('#cat').value })
-    });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || '查詢失敗');
-    render(j);
+    if (!meta) throw new Error('匯率資料還沒載入，請確認網路後重新整理');
+    render(await lookup(items, $('#cat').value));
   } catch (e) {
     $('#msg').textContent = e.message;
   } finally {
@@ -275,7 +397,7 @@ function render(j) {
   $('#dtBody').innerHTML = h;
   $('#foot').innerHTML = '每筆台幣＝外幣金額 × 匯率，四捨五入到元；各類別小計＝各筆台幣加總。' +
     (j.missing ? '<b class="bad">有 ' + j.missing + ' 筆查無匯率，未計入合計。</b>' : '') +
-    '<br>匯率來源：' + esc(j.source) + '（' + esc(j.sourceUrl) + '）　查詢時間：' + esc(j.queriedAt);
+    '<br>匯率來源：' + esc(j.source) + '（' + esc(j.sourceUrl) + '）　匯率資料更新：' + esc(j.dataUpdatedAt) + '　製表時間：' + esc(j.queriedAt);
   $('#src').href = j.sourceUrl;
   $('#copied').textContent = '';
   $('#result').style.display = 'block';

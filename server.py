@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
-"""出差報支匯率查詢：向兆豐銀行官網「歷史匯率」取消費當日的即期買入匯率，換算台幣。
-只用標準函式庫。啟動：python server.py（或打包後的 exe）→ http://localhost:8728
+"""出差報支匯率查詢：兆豐銀行官網「歷史匯率」的即期買入匯率。
+
+網頁版（GitHub Pages）：update_rates.py 每天由 GitHub Actions 執行，把匯率存成 data/ 底下的 JSON，
+頁面讀 JSON 自己換算。
+本機版：python server.py（或打包後的 exe）→ http://localhost:8728，
+data/ 的 JSON 改由本程式即時向兆豐官網查詢後提供，頁面同一份 index.html。
+只用標準函式庫。
 """
 import json
 import re
@@ -11,8 +16,7 @@ import urllib.request
 import uuid
 import http.cookiejar
 import webbrowser
-from datetime import date, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,9 +33,20 @@ CATEGORIES = {
     "FinalBusinessHourRate": "營業時間最後一次匯率(約15:30)",
     "FirstBusinessDayRate": "營業時間第一次匯率",
 }
-RATE_TYPES = {"Cash": "現金", "Spot": "即期"}
-LOOKBACK_DAYS = 15  # 遇假日往前找營業日，最多回看幾天
-TWD = "TWD"  # 新台幣：不查匯率、不換算（2026-11-17 新增，給國內／機場台幣消費用）
+RATE_TYPE = "Spot"  # 會計算法：即期・銀行買入
+TW = timezone(timedelta(hours=8))
+FINAL_AFTER = (16, 30)  # 台灣時間過了 16:30，當天的收盤匯率才算定案
+
+
+def tw_now():
+    return datetime.now(TW)
+
+
+def covered_through(now=None):
+    """到哪一天為止的匯率已經定案（過 16:30 才算當天）。"""
+    now = now or tw_now()
+    d = now.date()
+    return d if (now.hour, now.minute) >= FINAL_AFTER else d - timedelta(days=1)
 
 
 class Mega:
@@ -95,9 +110,9 @@ class Mega:
                 "singleDateStr": None, "categoryCode": category,
                 "rangeType": "range", "rateType": rate_type,
                 "specificTodayQuery": False,
-                }
+            }
             res = None
-            for attempt in range(3):  # 偶爾回空的，換新的 requestId 再問一次
+            for attempt in range(3):  # 偶爾回空的，換新的 requestId 再問一次（requestId 重複會回空）
                 params["requestId"] = str(uuid.uuid4())
                 res = self._post("Query", params)
                 if ((res or {}).get("data") or {}).get("rates"):
@@ -113,98 +128,43 @@ class Mega:
 MEGA = Mega()
 
 
-def lookup(items, category):
-    """會計規則（依 2024/11 會計報支表）：兆豐、即期、銀行買入、消費當天；
-    假日往前取最近營業日；各類別小計＝每筆先四捨五入到元後加總（2026-11-17 起；原為未進位加總後再四捨五入）。"""
-    rate_type = "Spot"
-    if category not in CATEGORIES:
-        raise ValueError("查詢類別不正確")
-    today = date.today()
-    parsed = []
-    for i, it in enumerate(items, 1):
-        try:
-            d = date.fromisoformat(str(it.get("date", "")).strip())
-        except ValueError:
-            raise ValueError(f"第 {i} 列日期格式不對")
-        code = str(it.get("currency", "")).strip().upper() or "USD"
-        if d > today:
-            raise ValueError(f"第 {i} 列日期 {d} 還沒到，查不到匯率")
-        if code != TWD and d < today - timedelta(days=365):
-            raise ValueError(f"第 {i} 列日期 {d} 超過一年，兆豐官網只保留最近一年的歷史匯率，查不到")
-        amt_raw = str(it.get("amount", "")).replace(",", "").strip()
-        try:
-            amt = Decimal(amt_raw) if amt_raw else None
-        except Exception:
-            raise ValueError(f"第 {i} 列金額不是數字")
-        parsed.append({"date": d, "currency": code, "amount": amt,
-                       "group": str(it.get("group", "")).strip() or "其他",
-                       "note": str(it.get("note", "")).strip()})
+def fetch_currency(code, start, end, pause=0.0):
+    """查一個幣別在期間內三種時點的即期買入匯率 → {類別: {"YYYY-MM-DD": "32.7700"}}"""
+    out = {}
+    for cat in CATEGORIES:
+        tbl = MEGA.query(code, RATE_TYPE, cat, start, end)
+        out[cat] = {d.isoformat(): v[0] for d, v in sorted(tbl.items()) if v[0]}
+        if pause:
+            time.sleep(pause)
+    return out
 
-    tables = {}
-    for code in sorted({p["currency"] for p in parsed} - {TWD}):  # 新台幣不用查匯率
-        ds = [p["date"] for p in parsed if p["currency"] == code]
-        start, end = min(ds) - timedelta(days=LOOKBACK_DAYS), max(ds)
-        if (end - start).days > 360:
-            raise ValueError(f"{code} 的日期跨度超過一年，請分次查")
-        tables[code] = MEGA.query(code, rate_type, category, start, end)
 
-    one = Decimal(1)
-    groups, order, rate_tbl, missing = {}, [], {}, 0
-    for p in parsed:
-        tbl = tables.get(p["currency"], {})
-        used = p["date"]
-        while used not in tbl and (p["date"] - used).days < LOOKBACK_DAYS:
-            used -= timedelta(days=1)
-        row = {"date": p["date"].isoformat(), "currency": p["currency"], "note": p["note"],
-               "amount": str(p["amount"]) if p["amount"] is not None else "",
-               "usedDate": None, "rate": None, "twd": None, "remark": ""}
-        exact = None
-        if p["currency"] == TWD:  # 新台幣消費：不換算，直接四捨五入到元
-            row.update(usedDate=p["date"].isoformat(), rate="1")
-            if p["amount"] is not None:
-                exact = p["amount"]
-                row["twd"] = int(exact.quantize(one, rounding=ROUND_HALF_UP))
-        elif used in tbl and tbl[used][0]:
-            buy = tbl[used][0]
-            row.update(usedDate=used.isoformat(), rate=buy)
-            key = (p["currency"], used)
-            rate_tbl.setdefault(key, {"currency": p["currency"], "rateDate": used.isoformat(),
-                                      "rate": buy, "forDates": []})
-            if row["date"] not in rate_tbl[key]["forDates"]:
-                rate_tbl[key]["forDates"].append(row["date"])
-            if used != p["date"]:
-                row["remark"] = f"{p['date'].strftime('%m/%d')} 無牌告，採前一營業日 {used.strftime('%m/%d')}"
-            if p["amount"] is not None:
-                exact = p["amount"] * Decimal(buy)
-                row["twd"] = int(exact.quantize(one, rounding=ROUND_HALF_UP))
-        else:
-            row["remark"] = "查無匯率"
-            missing += 1
-        if p["group"] not in groups:
-            groups[p["group"]] = {"name": p["group"], "rows": [], "_sum": Decimal(0)}
-            order.append(p["group"])
-        g = groups[p["group"]]
-        g["rows"].append(row)
-        if exact is not None:
-            # 2026-11-17 使用者決定：每筆先四捨五入到元，小計＝各筆整數加總（每列與小計對得起來）
-            g["_sum"] += Decimal(row["twd"])
+# ---- 本機版：即時提供與網頁版相同格式的 data/*.json ----
+_cache = {}
+_cache_lock = threading.Lock()
 
-    out_groups, total = [], 0
-    for name in order:
-        g = groups[name]
-        sub = int(g.pop("_sum").quantize(one, rounding=ROUND_HALF_UP))
-        g["subtotal"] = sub
-        total += sub
-        out_groups.append(g)
-    dates = sorted(p["date"] for p in parsed)
+
+def live_meta():
+    cov = covered_through().isoformat()
     return {
-        "groups": out_groups, "totalTwd": total, "missing": missing,
-        "rateTable": [rate_tbl[k] for k in sorted(rate_tbl)],
-        "dateFrom": dates[0].isoformat(), "dateTo": dates[-1].isoformat(),
-        "categoryLabel": CATEGORIES[category],
-        "queriedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "source": "兆豐國際商業銀行官網－匯率查詢－歷史匯率", "sourceUrl": PAGE + "?tab=3",
+        "updatedAt": tw_now().strftime("%Y-%m-%d %H:%M"),
+        "mode": "local",
+        "categories": CATEGORIES,
+        "currencies": [{"code": c["code"], "label": c["label"], "coveredThrough": cov}
+                       for c in MEGA.get_currencies()],
     }
+
+
+def live_rates(code):
+    with _cache_lock:
+        hit = _cache.get(code)
+        if hit and time.time() - hit[0] < 600:
+            return hit[1]
+    end = tw_now().date()
+    data = fetch_currency(code, end - timedelta(days=364), end)
+    with _cache_lock:
+        _cache[code] = (time.time(), data)
+    return data
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -226,26 +186,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
-            elif path == "/api/currencies":
-                self._send(200, {"currencies": MEGA.get_currencies(),
-                                 "categories": CATEGORIES, "rateTypes": RATE_TYPES})
+            elif path == "/data/meta.json":
+                self._send(200, live_meta())
+            elif m := re.fullmatch(r"/data/rates/([A-Z]{3})\.json", path):
+                self._send(200, live_rates(m.group(1)))
             else:
                 self._send(404, {"error": "not found"})
+        except ValueError as e:
+            self._send(404, {"error": str(e)})
         except Exception as e:
             self._send(502, {"error": f"連不上兆豐官網：{e}"})
-
-    def do_POST(self):
-        if self.path.split("?")[0] != "/api/rates":
-            return self._send(404, {"error": "not found"})
-        try:
-            n = int(self.headers.get("Content-Length") or 0)
-            req = json.loads(self.rfile.read(n).decode("utf-8"))
-            self._send(200, lookup(req.get("items") or [],
-                                   req.get("category", "LastBusinessDayRate")))
-        except ValueError as e:
-            self._send(400, {"error": str(e)})
-        except Exception as e:
-            self._send(502, {"error": f"向兆豐官網查詢失敗：{e}"})
 
 
 def main():
