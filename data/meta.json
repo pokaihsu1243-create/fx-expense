@@ -1,8 +1,8 @@
 {
- "updatedAt": "2026-11-27 05:50",
+ "updatedAt": "2026-11-28 02:25",
  "mode": "static",
  "keepMonths": 3,
- "keepFrom": "2026-08-12",
+ "keepFrom": "2026-08-13",
  "categories": {
   "LastBusinessDayRate": "營業日最後一次匯率(約16:00)",
   "FinalBusinessHourRate": "營業時間最後一次匯率(約15:30)",
@@ -12,72 +12,72 @@
   {
    "code": "USD",
    "label": "美元USD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "HKD",
    "label": "港幣HKD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "GBP",
    "label": "英鎊GBP",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "JPY",
    "label": "日圓JPY",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "AUD",
    "label": "澳幣AUD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "CAD",
    "label": "加拿大幣CAD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "SGD",
    "label": "新加坡幣SGD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "ZAR",
    "label": "南非幣ZAR",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "SEK",
    "label": "瑞典幣SEK",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "CHF",
    "label": "瑞士法郎CHF",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "THB",
    "label": "泰銖THB",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "NZD",
    "label": "紐西蘭幣NZD",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "EUR",
    "label": "歐元EUR",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   },
   {
    "code": "CNY",
    "label": "人民幣CNY",
-   "coveredThrough": "2026-11-26"
+   "coveredThrough": "2026-11-27"
   }
  ]
 }
